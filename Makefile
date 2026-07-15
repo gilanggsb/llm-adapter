@@ -1,4 +1,4 @@
-.PHONY: install run check docker-build docker-run
+.PHONY: install run check docker-build docker-up docker-down
 
 PYTHON := .venv/bin/python
 
@@ -12,7 +12,10 @@ check:
 	$(PYTHON) -m py_compile main.py config.py schemas.py anthropic.py routes/health.py routes/models.py routes/anthropic.py routes/chat.py
 
 docker-build:
-	docker build -t llm-adapter .
+	docker compose build
 
-docker-run:
-	set -a; . ./.env; set +a; docker run --rm --env-file .env -p $$PORT:$$PORT llm-adapter
+docker-up:
+	docker compose up --build
+
+docker-down:
+	docker compose down
