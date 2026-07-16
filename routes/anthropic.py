@@ -1,3 +1,4 @@
+import logging
 from typing import Any, AsyncIterator, Dict
 
 import httpx
@@ -8,6 +9,7 @@ import anthropic
 from schemas import ChatRequest
 
 router = APIRouter()
+error_log = logging.getLogger("error")
 
 
 def error(status: int, message: str, error_type: str = "invalid_request_error", param: str = None, code: str = None) -> JSONResponse:
@@ -20,6 +22,7 @@ async def anthropic_messages(body: Dict[str, Any], request: Request) -> JSONResp
     settings = request.app.state.settings
     model = body.get("model")
     if model not in settings.upstream_models:
+        error_log.error("local_rejection path=%s reason=model_not_found model=%r configured_models=%s", request.url.path, model, ",".join(settings.upstream_models))
         return error(400, f"Model '{model}' not found", param="model", code="model_not_found")
 
     headers = anthropic.headers(settings.upstream_api_key)
@@ -30,8 +33,10 @@ async def anthropic_messages(body: Dict[str, Any], request: Request) -> JSONResp
         else:
             response = await request.app.state.client.post(f"{settings.upstream_base_url}/messages", json=body, headers=headers)
     except httpx.TimeoutException:
+        error_log.error("upstream_timeout model=%s", model)
         return error(504, f"Request to upstream timed out after {settings.request_timeout:g} seconds", "server_error", code="timeout")
     except httpx.HTTPError as exc:
+        error_log.error("upstream_failed model=%s error=%s", model, exc)
         return error(502, f"Upstream request failed: {exc}", "server_error")
 
     if response.is_error:
@@ -39,6 +44,7 @@ async def anthropic_messages(body: Dict[str, Any], request: Request) -> JSONResp
             message = response.json().get("error", {}).get("message", response.text)
         except ValueError:
             message = response.text
+        error_log.error("upstream_error model=%s status=%s body=%s", model, response.status_code, message)
         if hasattr(response, "aclose"):
             await response.aclose()
         return error(response.status_code, message)
