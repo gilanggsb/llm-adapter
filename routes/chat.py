@@ -1,4 +1,5 @@
 from typing import Any, AsyncIterator
+import logging
 
 import httpx
 from fastapi import APIRouter, Request
@@ -8,6 +9,7 @@ import anthropic
 from schemas import ChatRequest
 
 router = APIRouter()
+error_log = logging.getLogger("error")
 
 
 def error(status: int, message: str, error_type: str = "invalid_request_error", param: str = None, code: str = None) -> JSONResponse:
@@ -18,16 +20,26 @@ def error(status: int, message: str, error_type: str = "invalid_request_error", 
 @router.post("/v1/chat/completions")
 async def chat_completions(body: ChatRequest, request: Request) -> JSONResponse:
     settings = request.app.state.settings
-    if body.model not in settings.upstream_models:
-        return error(400, f"Model '{body.model}' not found", param="model", code="model_not_found")
+    requested_model = body.model
+    if requested_model not in settings.upstream_models:
+        if len(settings.upstream_models) == 1:
+            requested_model = next(iter(settings.upstream_models))
+            error_log.info("model_fallback requested=%r selected=%r", body.model, requested_model)
+        else:
+            message = f"Model '{body.model}' not found"
+            error_log.error("local_rejection path=%s reason=model_not_found model=%r configured_models=%s", request.url.path, body.model, ",".join(settings.upstream_models))
+            return error(400, message, param="model", code="model_not_found")
+    model_config = settings.upstream_models[requested_model]
+    upstream_model = model_config.get("upstream_model", requested_model)
+    body = body.model_copy(update={"model": upstream_model})
 
     provider = settings.upstream_provider_type
     if provider == "anthropic":
-        return _anthropic_chat(body, request, settings)
+        return await _anthropic_chat(body, request, settings)
     elif provider == "openai":
-        return _openai_chat(body, request, settings)
+        return await _openai_chat(body, request, settings)
     else:
-        return _generic_chat(body, request, settings)
+        return await _generic_chat(body, request, settings)
 
 
 async def _anthropic_chat(body: ChatRequest, request: Request, settings: Any) -> JSONResponse:

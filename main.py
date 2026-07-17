@@ -47,6 +47,8 @@ app = FastAPI(lifespan=lifespan)
 @app.middleware("http")
 async def log_access(request: Request, call_next):
     started = time.monotonic()
+    body = (await request.body()).decode("utf-8", errors="replace") if request.method in {"POST", "PUT", "PATCH"} else ""
+    access_log.info("request method=%s path=%s body=%s", request.method, request.url.path, body)
     try:
         response = await call_next(request)
     except Exception:

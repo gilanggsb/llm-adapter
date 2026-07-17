@@ -58,8 +58,6 @@ async def anthropic_messages(body: Dict[str, Any], request: Request) -> JSONResp
     return JSONResponse(content=response.json())
 
 
-@router.post("/chat/completions")
-@router.post("/v1/chat/completions")
 async def chat_completions(body: ChatRequest, request: Request) -> JSONResponse:
     settings = request.app.state.settings
     if body.model not in settings.upstream_models:
